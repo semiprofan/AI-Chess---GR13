@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Nhóm 13 - Đang Chơi</title>
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 20px; background-color: #f4f4f9; }
+        
+        .header { display: flex; justify-content: space-between; width: 700px; margin-bottom: 20px; align-items: center; }
+        .btn-back { background-color: #6c757d; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: bold; }
+        .btn-back:hover { background-color: #5a6268; }
+        
+        #status { font-weight: bold; color: #333; font-size: 1.5em; text-align: center; }
+        
+        .timers { display: flex; justify-content: space-between; width: 400px; margin-bottom: 15px; }
+        .timer-box { padding: 8px 15px; border-radius: 6px; font-size: 18px; font-weight: bold; background-color: #e0e0e0; color: #555; transition: all 0.3s ease; border: 2px solid transparent; }
+        .timer-box.active { background-color: #4CAF50; color: white; transform: scale(1.05); box-shadow: 0 4px 8px rgba(76, 175, 80, 0.4); }
+        .timer-box.danger { background-color: #f44336 !important; color: white !important; animation: pulse 1s infinite; }
+        
+        .game-wrapper { display: flex; justify-content: center; align-items: flex-start; gap: 20px; margin-top: 10px; }
+        #board { width: 400px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        
+        .score-panel { background-color: white; border: 2px solid #e0e0e0; border-radius: 8px; padding: 15px; width: 140px; height: 400px; box-sizing: border-box; text-align: center; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: flex-start; }
+        .score-panel h3 { margin: 0 0 10px 0; font-size: 16px; color: #555; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; }
+        .score-val { font-size: 32px; font-weight: bold; margin-bottom: 10px; }
+        .text-white { color: #4CAF50; } 
+        .text-black { color: #555; }    
+        
+        .move-history { flex-grow: 1; overflow-y: auto; text-align: left; border-top: 2px solid #f0f0f0; padding-top: 10px; font-size: 14px; color: #333; }
+        .move-item { padding: 4px 0; border-bottom: 1px dashed #eee; }
+        .move-item b { color: #888; margin-right: 5px; font-size: 12px; }
+        
+        .move-history::-webkit-scrollbar { width: 5px; }
+        .move-history::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+
+        @keyframes pulse {
+            0% { transform: scale(1.05); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1.05); }
+        }
+
+        /* --- CSS CHO CÁC Ô GỢI Ý MÀU --- */
+        .highlight-possible {
+            box-shadow: inset 0 0 3px 4px rgba(255, 215, 0, 0.8) !important; /* Màu vàng khi rê chuột */
+            border-radius: 4px;
+        }
+        .highlight-hint {
+            box-shadow: inset 0 0 5px 5px rgba(0, 255, 0, 0.8) !important; /* Màu xanh khi gợi ý tự động */
+            background-color: rgba(0, 255, 0, 0.3) !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <a href="/" class="btn-back">⬅ Về Menu</a>
+        <div id="status">Lượt của: Trắng</div>
+        <div style="width: 100px;"></div>
+    </div>
+
+    <div class="timers">
+        <div id="box-w" class="timer-box active">Trắng: <span id="time-w">00:00</span></div>
+        <div id="box-b" class="timer-box">Đen: <span id="time-b">00:00</span></div>
+    </div>
+
+    <div class="game-wrapper">
+        <div class="score-panel">
+            <h3>Điểm Trắng</h3>
+            <div id="score-white" class="score-val text-white">0</div>
+            <div class="move-history" id="history-white"></div>
+        </div>
+
+        <div id="board"></div>
+
+        <div class="score-panel">
+            <h3>Điểm Đen</h3>
+            <div id="score-black" class="score-val text-black">0</div>
+            <div class="move-history" id="history-black"></div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+    <script>
+        var board = null;
+        var game = new Chess();
+        var $status = $('#status');
+        
+        var defaultTime = parseInt("{{ time }}"); 
+        var playerColor = "{{ color }}"; 
+        var chosenDepth = parseInt("{{ depth }}"); 
+        
+        var timeLeft = { w: defaultTime, b: defaultTime };
+        var timerInterval = null;
+        
+        // BIẾN CHO GỢI Ý 30S
+        var hintTimer = null; 
+
+        function formatTime(seconds) {
+            var m = Math.floor(seconds / 60);
+            var s = seconds % 60;
+            return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s);
+        }
+
+        function updateTimersUI() {
+            $('#time-w').text(formatTime(timeLeft.w));
+            $('#time-b').text(formatTime(timeLeft.b));
+
+            if (game.turn() === 'w') {
+                $('#box-w').addClass('active');
+                $('#box-b').removeClass('active');
+            } else {
+                $('#box-b').addClass('active');
+                $('#box-w').removeClass('active');
+            }
+
+            if (timeLeft.w <= 60) $('#box-w').addClass('danger'); else $('#box-w').removeClass('danger');
+            if (timeLeft.b <= 60) $('#box-b').addClass('danger'); else $('#box-b').removeClass('danger');
+        }
+
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(function() {
+                var currentTurn = game.turn();
+                timeLeft[currentTurn]--;
+                updateTimersUI();
+
+                if (timeLeft[currentTurn] <= 0) {
+                    clearInterval(timerInterval);
+                    var winner = currentTurn === 'w' ? 'Đen' : 'Trắng';
+                    alert('Hết giờ! Người chiến thắng: ' + winner);
+                }
+            }, 1000);
+        }
+
+        function fetchEvaluation() {
+            fetch('/api/evaluate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fen: game.fen() })
+            })
+            .then(res => res.json())
+            .then(data => {
+                var rawScore = data.score; 
+                if (rawScore > 0) {
+                    $('#score-white').text('+' + rawScore);
+                    $('#score-black').text('0');
+                } else if (rawScore < 0) {
+                    $('#score-white').text('0');
+                    $('#score-black').text('+' + Math.abs(rawScore));
+                } else {
+                    $('#score-white').text('0');
+                    $('#score-black').text('0');
+                }
+            })
+            .catch(e => console.log("Lỗi tải điểm: ", e));
+        }
+
+        function updateMoveHistory() {
+            var history = game.history(); 
+            var whiteHtml = '';
+            var blackHtml = '';
+            
+            for (var i = 0; i < history.length; i++) {
+                var moveNum = Math.floor(i / 2) + 1; 
+                if (i % 2 === 0) { 
+                    whiteHtml += '<div class="move-item"><b>' + moveNum + '.</b> ' + history[i] + '</div>';
+                } else { 
+                    blackHtml += '<div class="move-item"><b>' + moveNum + '.</b> ' + history[i] + '</div>';
+                }
+            }
+            
+            $('#history-white').html(whiteHtml);
+            $('#history-black').html(blackHtml);
+
+            var hw = document.getElementById('history-white');
+            var hb = document.getElementById('history-black');
+            hw.scrollTop = hw.scrollHeight;
+            hb.scrollTop = hb.scrollHeight;
+        }
+
+        // ===============================================
+        // CÁC HÀM XỬ LÝ GỢI Ý NƯỚC ĐI VÀ RÊ CHUỘT (HOVER)
+        // ===============================================
+        
+        // 1. Xóa các màu vàng khi di chuột đi chỗ khác
+        function removeHoverHighlights() {
+            $('#board .square-55d63').removeClass('highlight-possible');
+        }
+
+        // 2. Xóa các màu xanh lá khi người chơi đã tự đi cờ
+        function removeHintHighlights() {
+            if (hintTimer) clearTimeout(hintTimer);
+            $('#board .square-55d63').removeClass('highlight-hint');
+        }
+
+        // 3. Khi rê chuột vào một ô
+        function onMouseoverSquare(square, piece) {
+            // Lấy tất cả nước đi hợp lệ của quân cờ đang rê chuột
+            var moves = game.moves({
+                square: square,
+                verbose: true
+            });
+
+            if (moves.length === 0) return; // Nếu không có nước đi thì thoát
+
+            // Tô vàng ô đang đứng
+            $('#board .square-' + square).addClass('highlight-possible');
+
+            // Tô vàng các ô có thể nhảy tới
+            for (var i = 0; i < moves.length; i++) {
+                $('#board .square-' + moves[i].to).addClass('highlight-possible');
+            }
+        }
+
+        // 4. Khi rê chuột ra khỏi ô
+        function onMouseoutSquare(square, piece) {
+            removeHoverHighlights();
+        }
+
+        // 5. Bắt đầu đếm ngược 30 giây để gợi ý
+        function startHintTimer() {
+            removeHintHighlights(); 
+            // Chỉ đếm ngược khi đang là lượt của người chơi
+            if (game.turn() === playerColor && !game.game_over()) {
+                hintTimer = setTimeout(function() {
+                    // Gọi AI tìm nước đi (để depth = 2 cho AI phản hồi ngay lập tức)
+                    fetch('/api/ai_move', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fen: game.fen(), depth: 2 })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.move) {
+                            var from = data.move.substring(0, 2);
+                            var to = data.move.substring(2, 4);
+                            // Hiển thị màu xanh lá ở vị trí gợi ý
+                            $('#board .square-' + from).addClass('highlight-hint');
+                            $('#board .square-' + to).addClass('highlight-hint');
+                        }
+                    });
+                }, 30000); // 30000 mili-giây = 30 giây
+            }
+        }
+
+        // ===============================================
+        // CẬP NHẬT LẠI CÁC SỰ KIỆN KÉO THẢ
+        // ===============================================
+
+        function onDragStart (source, piece, position, orientation) {
+            if (game.game_over() || timeLeft.w <= 0 || timeLeft.b <= 0) return false;
+            
+            if ((playerColor === 'w' && piece.search(/^b/) !== -1) ||
+                (playerColor === 'b' && piece.search(/^w/) !== -1)) {
+                return false;
+            }
+            
+            if (game.turn() !== playerColor) {
+                return false;
+            }
+
+            // Khi người chơi chạm vào quân cờ, xóa gợi ý 30s
+            removeHintHighlights();
+        }
+
+        function onDrop (source, target) {
+            removeHoverHighlights();
+
+            var move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q' 
+            });
+
+            if (move === null) {
+                startHintTimer(); // Đặt lại timer nếu đi sai
+                return 'snapback';
+            }
+
+            updateStatus();
+            updateTimersUI(); 
+            fetchEvaluation(); 
+            updateMoveHistory(); 
+            window.setTimeout(makeAiMove, 250);
+        }
+
+        function makeAiMove() {
+            if (timeLeft.w <= 0 || timeLeft.b <= 0) return;
+
+            $status.html("AI đang suy nghĩ...");
+            
+            fetch('/api/ai_move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    fen: game.fen(),
+                    depth: chosenDepth  
+                }),
+            })
+            .then(response => {
+                if (!response.ok) throw new Error("Lỗi kết nối AI");
+                return response.json();
+            })
+            .then(data => {
+                if (timeLeft.w <= 0 || timeLeft.b <= 0) return; 
+
+                game.move(data.move, { sloppy: true });
+                board.position(game.fen());
+                updateStatus();
+                updateTimersUI();
+                fetchEvaluation(); 
+                updateMoveHistory(); 
+
+                // Lượt của máy đi xong -> Bắt đầu đếm 30 giây cho người chơi
+                startHintTimer();
+            })
+            .catch(error => {
+                console.error("Lỗi:", error);
+                $status.html("Lỗi: AI không phản hồi!");
+            });
+        }
+
+        function updateStatus () {
+            if (timeLeft.w <= 0 || timeLeft.b <= 0) return;
+
+            var statusHTML = '';
+            var moveColor = game.turn() === 'w' ? 'Trắng' : 'Đen';
+
+            if (game.in_checkmate()) {
+                statusHTML = 'Hết cờ! ' + moveColor + ' đã thua.';
+                clearInterval(timerInterval); 
+                removeHintHighlights();
+            } else if (game.in_draw()) {
+                statusHTML = 'Hòa cờ!';
+                clearInterval(timerInterval); 
+                removeHintHighlights();
+            } else {
+                statusHTML = 'Lượt của: ' + moveColor;
+                if (game.in_check()) {
+                    statusHTML += ' <span style="color:red">(Đang bị chiếu!)</span>';
+                }
+            }
+            $status.html(statusHTML);
+        }
+
+        function startGame() {
+            game.reset();
+            
+            // Cấu hình thêm 2 sự kiện Rê Chuột (Hover)
+            var config = {
+                draggable: true,
+                position: 'start',
+                orientation: playerColor === 'w' ? 'white' : 'black',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onMouseoutSquare: onMouseoutSquare,
+                onMouseoverSquare: onMouseoverSquare,
+                pieceTheme: '/static/img/chesspieces/wikipedia/{piece}.png'
+            };
+            board = Chessboard('board', config);
+            
+            timeLeft = { w: defaultTime, b: defaultTime };
+            updateTimersUI();
+            updateStatus();
+            startTimer(); 
+            fetchEvaluation(); 
+            updateMoveHistory(); 
+            
+            if (playerColor === 'b') {
+                window.setTimeout(makeAiMove, 250);
+            } else {
+                startHintTimer(); // Đếm 30s gợi ý nước đầu tiên cho Trắng
+            }
+        }
+
+        $(document).ready(function() {
+            startGame();
+        });
+    </script>
+</body>
+</html>
